@@ -22,112 +22,98 @@ close all
 
 
 %% simulation
+% System parameters
+A = 0.1; % Amplitude of vertical driving motion
+L = 1; % Length of pendulum
+g = 9.81; % Accleration of gravity
+gamma = 0.01; % Linear drag term
 
-%% target set
-L=[2 0 0; 0 1 0; 0 0 .1];
-c=[9.5; 0.6; 0];
+% Precomputing constant terms
+beta = A / L;
+alpha = g / L;
+
+% ODE
+function dxdt = pendulate_ode(t,x,u)
+  dxdt = zeros(2,1);
+
+  dxdt(1)=x(2);
+  dxdt(2)=(beta*(u^2)*cos(u*t) - alpha)*sin(x(1)) - gamma*x(2);
+end
+
+
+% target set
+% L=[2 0 0; 0 1 0; 0 0 .1];
+% c=[9.5; 0.6; 0];
 
 % initial state
-x0=[0.5 0.5 pi/2];
+x0=[pi, -0.1];
 
-controller=SymbolicSet('bdd/pendulate_controller.bdd','projection',[1 2 3]);
+% controller=SymbolicSet('bdd/pendulate_controller.bdd','projection',[1 2 3]);
 
 y=x0;
 v=[];
-while(1)
+n_iter = 1000;
+dt = 0.01;
+u = 8 + (1:n_iter)*dt*0.5;
+for i = 1:n_iter
 
   
-  if ( (y(end,:)-c')*L'*L*(y(end,:)'-c)<=1 )
-    break;
-  end 
+  % if ( (y(end,:)-c')*L'*L*(y(end,:)'-c)<=1 )
+  %   break;
+  % end 
 
-  u=controller.getInputs(y(end,:));
-  v=[v; u(1,:)];
-  [t x]=ode45(@pendulate_ode,[0 .3], y(end,:),[],u(1,:));
+  % u=controller.getInputs(y(end,:));
+  v=[v; u];
+  [t, x]=ode45(@pendulate_ode, [0, dt], y(end,:),[],u(i));
 
   y=[y; x(end,:)];
 end
 
+time = (1:n_iter+1) * dt;
 
-
-%% plot the pendulate domain
-% colors
-colors=get(groot,'DefaultAxesColorOrder');
-
-
-% load the symbolic set containig the abstract state space
-set=SymbolicSet('bdd/pendulate_ss.bdd','projection',[1 2]);
-plotCells(set,'facecolor','none','edgec',[0.8 0.8 0.8],'linew',.1)
-hold on
-
-% load the symbolic set containig obstacles
-set=SymbolicSet('bdd/pendulate_obst.bdd','projection',[1 2]);
-plotCells(set,'facecolor',colors(1,:)*0.5+0.5,'edgec',colors(1,:),'linew',.1)
-
-% plot the real obstacles and target set
-plot_domain
-
-% load the symbolic set containig target set
-set=SymbolicSet('bdd/pendulate_target.bdd','projection',[1 2]);
-plotCells(set,'facecolor',colors(2,:)*0.5+0.5,'edgec',colors(2,:),'linew',.1)
-
-% plot initial state  and trajectory
-plot(y(:,1),y(:,2),'k.-')
-plot(y(1,1),y(1,1),'.','color',colors(5,:),'markersize',20)
-
-
-box on
-axis([-.5 10.5 -.5 10.5])
-
+plot_trajectory(y, time, L)
 
 end
 
-function dxdt = pendulate_ode(t,x,u)
+function plot_trajectory(x, t, L)
+    figure('Position', [100,100,1800,530])
+    tiledlayout(1,3, 'TileSpacing','tight')
+    
+    ax1 = nexttile;
+    scatter(x(:,1)/pi, x(:,2), 25, '.', 'CData',t)
+    title('Pendulum Phase Portrait')
+    xlabel('\theta')
+    ylabel('$\dot{\theta}$', 'Interpreter','latex')
+    colormap(ax1, winter)
+    cb1 = colorbar;
+    ylabel(cb1, 'Time (s)')
 
-  dxdt = zeros(3,1);
+    ax2 = nexttile;
+    scatter(t, x(:,1)/pi, 25, '.', 'CData',abs(x(:,2)))
+    title('Pendulum \theta vs Time')
+    xlabel('Time')
+    ylabel('\theta')
+    colormap(ax2, parula)
+    cb2 = colorbar;
+    ylabel(cb2, 'Angular Speed ($|\dot{\theta}|$)', 'Interpreter','latex')
+    
+    ax3 = nexttile;
+    scatter(0, 0, 50, 'red')
+    hold on
+    pos = [sin(x(:,1)), -cos(x(:,1))] * L;
+    % Color by w
+    % scatter(pos(:,1), pos(:,2), 25, '.', 'CData',abs(x(:,2)))
+    % colormap(ax3, parula)
+    % cb3 = colorbar;
+    % ylabel(cb3, 'Angular Speed ($|\dot{\theta}|$)', 'Interpreter','latex')
+    % Color by t
+    scatter(pos(:,1), pos(:,2), 25, '.', 'CData',t)
+    colormap(ax3, winter)
+    cb3 = colorbar;
+    ylabel(cb3, 'Time(s)')
 
-  dxdt(1)=u(1)*cos(x(3));
-  dxdt(2)=u(1)*sin(x(3));
-  dxdt(3)=u(2);
-
-
-end
-
-function plot_domain
-
-colors=get(groot,'DefaultAxesColorOrder');
-
-
-v=[1     0  ;1.2  0   ; 1     9    ; 1.2 9   ];
-patch('vertices',v,'faces',[1 2 4 3],'facec',colors(1,:),'edgec',colors(1,:));
-v=[2.2   0  ;2.4  0   ; 2.2   5    ; 2.4 5   ];
-patch('vertices',v,'faces',[1 2 4 3],'facec',colors(1,:),'edgec',colors(1,:));
-v=[2.2   6  ;2.4  6   ; 2.2   10   ; 2.4 10  ];
-patch('vertices',v,'faces',[1 2 4 3],'facec',colors(1,:),'edgec',colors(1,:));
-v=[3.4   0  ;3.6  0   ; 3.4   9    ; 3.6 9   ];
-patch('vertices',v,'faces',[1 2 4 3],'facec',colors(1,:),'edgec',colors(1,:));
-v=[4.6   1  ;4.8  1   ; 4.6   10   ; 4.8 10  ];
-patch('vertices',v,'faces',[1 2 4 3],'facec',colors(1,:),'edgec',colors(1,:));
-v=[5.8   0  ;6    0   ; 5.8   6    ; 6   6   ];
-patch('vertices',v,'faces',[1 2 4 3],'facec',colors(1,:),'edgec',colors(1,:));
-v=[5.8   7  ;6    7   ; 5.8   10   ; 6   10  ];
-patch('vertices',v,'faces',[1 2 4 3],'facec',colors(1,:),'edgec',colors(1,:));
-v=[7     1  ;7.2  1   ; 7     10   ; 7.2 10  ];
-patch('vertices',v,'faces',[1 2 4 3],'facec',colors(1,:),'edgec',colors(1,:));
-v=[8.2   0  ;8.4  0   ; 8.2   8.5  ; 8.4 8.5 ];
-patch('vertices',v,'faces',[1 2 4 3],'facec',colors(1,:),'edgec',colors(1,:));
-v=[8.4   8.3;9.3  8.3 ; 8.4   8.5  ; 9.3 8.5 ];
-patch('vertices',v,'faces',[1 2 4 3],'facec',colors(1,:),'edgec',colors(1,:));
-v=[9.3   7.1;10   7.1 ; 9.3   7.3  ; 10  7.3 ];
-patch('vertices',v,'faces',[1 2 4 3],'facec',colors(1,:),'edgec',colors(1,:));
-v=[8.4   5.9;9.3  5.9 ; 8.4   6.1  ; 9.3 6.1 ];
-patch('vertices',v,'faces',[1 2 4 3],'facec',colors(1,:),'edgec',colors(1,:));
-v=[9.3   4.7;10   4.7 ; 9.3   4.9  ; 10  4.9 ];
-patch('vertices',v,'faces',[1 2 4 3],'facec',colors(1,:),'edgec',colors(1,:));
-v=[8.4   3.5;9.3  3.5 ; 8.4   3.7  ; 9.3 3.7 ];
-patch('vertices',v,'faces',[1 2 4 3],'facec',colors(1,:),'edgec',colors(1,:));
-v=[9.3   2.3;10   2.3 ; 9.3   2.5  ; 10  2.5 ];
-patch('vertices',v,'faces',[1 2 4 3],'facec',colors(1,:),'edgec',colors(1,:));
-
-
+    xlim([-L, L])
+    ylim([-L, L])
+    title('Pendulum Position')
+    hold off
 end
