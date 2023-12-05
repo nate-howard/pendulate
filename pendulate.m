@@ -26,18 +26,19 @@ close all
 A = 0.1; % Amplitude of vertical driving motion
 L = 1; % Length of pendulum
 g = 9.81; % Accleration of gravity
-gamma = 0.01; % Linear drag term
+gamma = 0.05; % Linear drag term
 
 % Precomputing constant terms
-beta = A / L;
 alpha = g / L;
+beta = A / L;
 
 % ODE
 function dxdt = pendulate_ode(t,x,u)
-  dxdt = zeros(2,1);
+  dxdt = zeros(3,1);
 
   dxdt(1)=x(2);
-  dxdt(2)=(beta*(u^2)*cos(u*t) - alpha)*sin(x(1)) - gamma*x(2);
+  dxdt(2)=(beta*(u^2)*cos(x(3)) - alpha)*sin(x(1)) - gamma*x(2);
+  dxdt(3)=u;
 end
 
 
@@ -46,15 +47,16 @@ end
 % c=[9.5; 0.6; 0];
 
 % initial state
-x0=[pi, -0.1];
+x0=[pi, -0.1, 0];
 
 % controller=SymbolicSet('bdd/pendulate_controller.bdd','projection',[1 2 3]);
 
 y=x0;
 v=[];
-n_iter = 1000;
-dt = 0.01;
-u = 8 + (1:n_iter)*dt*0.5;
+time = [0];
+n_iter = 100;
+dt = 0.1;
+u = 1;%8 + (1:n_iter)*dt*0.5;
 for i = 1:n_iter
 
   
@@ -64,12 +66,11 @@ for i = 1:n_iter
 
   % u=controller.getInputs(y(end,:));
   v=[v; u];
-  [t, x]=ode45(@pendulate_ode, [0, dt], y(end,:),[],u(i));
+  [t, x]=ode45(@pendulate_ode, [time(end), time(end) + dt], y(end,:),[],u);
 
+  time = [time; t(end)];
   y=[y; x(end,:)];
 end
-
-time = (1:n_iter+1) * dt;
 
 plot_trajectory(y, time, L)
 

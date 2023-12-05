@@ -33,28 +33,40 @@ std::string transitionRelationFile = bddDir + "pendulate_transition_relation.bdd
 
 /* state space dim */
 #define sDIM 3
-#define iDIM 2
+#define iDIM 1
 
 /* data types for the ode solver */
 typedef std::array<double,3> state_type;
-typedef std::array<double,2> input_type;
+typedef std::array<double,1> input_type;
 
 /* sampling time */
-const double tau = 0.3;
+const double tau = 0.1;
 /* number of intermediate steps in the ode solver */
-const int nint=5;
+const int nint=10;
 OdeSolver ode_solver(sDIM,nint,tau);
 
-/* we integrate the pendulate ode by 0.3 sec (the result is stored in x)  */
+/* system parameters */
+const double A = 0.1; // Amplitude of vertical driving motion
+const double L = 1; // Length of the pendulum
+const double g = 9.81; // Acceleration of gravity
+const double b = 0.05; // Linear drag term
+
+const double alpha = g / L;
+const double beta = A / L;
+
+/* we integrate the pendulate ode by tau sec (the result is stored in x)  */
 auto  pendulate_post = [](state_type &x, input_type &u) -> void {
 
   /* the ode describing the pendulate */
-  auto rhs =[](state_type& xx,  const state_type &x, input_type &u) -> void {
-      xx[0] = u[0]*std::cos(x[2]);
-      xx[1] = u[0]*std::sin(x[2]);
-      xx[2] = u[1];
+  auto rhs =[](state_type& dxdt,  const state_type &x, input_type &u) -> void {
+      dxdt[0] = x[1];
+      dxdt[1] = (beta*u[0]*u[0]*std::cos(x[2]) - alpha)*std::sin(x[0]) - b*x[1];
+      dxdt[2] = u[0];
   };
   ode_solver(rhs,x,u);
+  
+  x[0] = x[0] - 2*M_PI*std::floor(x[0] / (2*M_PI)); // Wrap theta around [0, 2pi]
+  x[2] = x[2] - 2*M_PI*std::floor(x[2] / (2*M_PI)); // Wrap phase around [0, 2pi]
 };
 
 /* computation of the growth bound (the result is stored in r)  */
@@ -69,7 +81,6 @@ auto radius_post = [](state_type &r, input_type &u) -> void {
 scots::SymbolicSet pendulateCreateStateSpace(Cudd &mgr);
 scots::SymbolicSet pendulateCreateInputSpace(Cudd &mgr);
 
-
 int main() {
   /* to measure time */
   TicToc tt;
@@ -82,9 +93,9 @@ int main() {
   scots::SymbolicSet ss=pendulateCreateStateSpace(mgr);
   ss.writeToFile(stateSpaceFile.c_str());
   /* write SymbolicSet of obstacles to pendulate_obst.bdd */
-  ss.complement();
-  ss.writeToFile(obstaclesFile.c_str());
-  ss.complement();
+  // ss.complement();
+  // ss.writeToFile(obstaclesFile.c_str());
+  // ss.complement();
   std::cout << "Unfiorm grid details:" << std::endl;
   ss.printInfo(1);
 
@@ -95,12 +106,13 @@ int main() {
    * information in the new symbolic set */
   scots::SymbolicSet ts = ss;
   /* define the target set as a symbolic set */
-  double H[9]={ 2, 0, 0,
-                0, 1, 0,
-                0, 0, .1};
+  double H[4*sDIM]={-1, 0, 0, // This matrix lets us simply define bounds on x[0] and x[1]
+                    1, 0, 0,
+                    0,-1, 0,
+                    0, 1, 0};
   /* compute inner approximation of P={ x | H x<= h1 }  */
-  double c[3] = {9.5,0.6,0};
-  ts.addEllipsoid(H,c, scots::INNER);
+  double h[4] = {-3,3.3, 0.1,0.1}; // {-lb0, ub0, -lb1, up1}
+  ts.addPolytope(4,H,h, scots::INNER);
   ts.writeToFile(targetFile.c_str());
 
 
@@ -151,21 +163,22 @@ int main() {
 
   scots::SymbolicSet tr = abstraction.getTransitionRelation();
   tr.writeToFile(transitionRelationFile.c_str());
-
-
   
-  return 1;
+  return 0;
 }
 
 scots::SymbolicSet pendulateCreateStateSpace(Cudd &mgr) {
 
+  const double maxOmega = 11;
+
   /* setup the workspace of the synthesis problem and the uniform grid */
   /* lower bounds of the hyper rectangle */
-  double lb[sDIM]={0,0,-M_PI-0.4};  
+  double lb[sDIM]={0,-maxOmega, 0};
   /* upper bounds of the hyper rectangle */
-  double ub[sDIM]={10,10,M_PI+0.4}; 
+  double ub[sDIM]={2*M_PI,maxOmega, 2*M_PI}; 
   /* grid node distance diameter */
-  double eta[sDIM]={.2,.2,.1};   
+  double eta[sDIM]={.1, .5, .2};
+  // double eta[sDIM]={1, 5, 1};
 
 
 
@@ -176,59 +189,6 @@ scots::SymbolicSet pendulateCreateStateSpace(Cudd &mgr) {
 
   /* add the grid points to the SymbolicSet ss */
   ss.addGridPoints();
-  /* remove the obstacles from the state space */
-  /* the obstacles are defined as polytopes */
-  /* define H* x <= h */
-  double H[4*sDIM]={-1, 0, 0,
-                    1, 0, 0,
-                    0,-1, 0,
-                    0, 1, 0};
-  /* remove outer approximation of P={ x | H x<= h1 } form state space */
-  double h1[4] = {-1,1.2,-0, 9};
-  ss.remPolytope(4,H,h1, scots::OUTER);
-  /* remove outer approximation of P={ x | H x<= h2 } form state space */
-  double h2[4] = {-2.2,2.4,-0,5};
-  ss.remPolytope(4,H,h2, scots::OUTER);
-  /* remove outer approximation of P={ x | H x<= h3 } form state space */
-  double h3[4] = {-2.2,2.4,-6,10};
-  ss.remPolytope(4,H,h3, scots::OUTER);
-  /* remove outer approximation of P={ x | H x<= h4 } form state space */
-  double h4[4] = {-3.4,3.6,-0,9};
-  ss.remPolytope(4,H,h4, scots::OUTER);
-  /* remove outer approximation of P={ x | H x<= h5 } form state space */
-  double h5[4] = {-4.6 ,4.8,-1,10};
-  ss.remPolytope(4,H,h5, scots::OUTER);
-  /* remove outer approximation of P={ x | H x<= h6 } form state space */
-  double h6[4] = {-5.8,6,-0,6};
-  ss.remPolytope(4,H,h6, scots::OUTER);
-  /* remove outer approximation of P={ x | H x<= h7 } form state space */
-  double h7[4] = {-5.8,6,-7,10};
-  ss.remPolytope(4,H,h7, scots::OUTER);
-  /* remove outer approximation of P={ x | H x<= h8 } form state space */
-  double h8[4] = {-7,7.2,-1,10};
-  ss.remPolytope(4,H,h8, scots::OUTER);
-  /* remove outer approximation of P={ x | H x<= h9 } form state space */
-  double h9[4] = {-8.2,8.4,-0,8.5};
-  ss.remPolytope(4,H,h9, scots::OUTER);
-  /* remove outer approximation of P={ x | H x<= h10 } form state space */
-  double h10[4] = {-8.4,9.3,-8.3,8.5};
-  ss.remPolytope(4,H,h10, scots::OUTER);
-  /* remove outer approximation of P={ x | H x<= h11 } form state space */
-  double h11[4] = {-9.3,10,-7.1,7.3};
-  ss.remPolytope(4,H,h11, scots::OUTER);
-  /* remove outer approximation of P={ x | H x<= h12 } form state space */
-  double h12[4] = {-8.4,9.3,-5.9,6.1};
-  ss.remPolytope(4,H,h12, scots::OUTER);
-  /* remove outer approximation of P={ x | H x<= h13 } form state space */
-  double h13[4] = {-9.3,10 ,-4.7,4.9};
-  ss.remPolytope(4,H,h13, scots::OUTER);
-  /* remove outer approximation of P={ x | H x<= h14 } form state space */
-  double h14[4] = {-8.4,9.3,-3.5,3.7};
-  ss.remPolytope(4,H,h14, scots::OUTER);
-  /* remove outer approximation of P={ x | H x<= h15 } form state space */
-  double h15[4] = {-9.3,10 ,-2.3,2.5};
-  ss.remPolytope(4,H,h15, scots::OUTER);
-
 
  return ss;
 }
@@ -236,11 +196,12 @@ scots::SymbolicSet pendulateCreateStateSpace(Cudd &mgr) {
 scots::SymbolicSet pendulateCreateInputSpace(Cudd &mgr) {
 
   /* lower bounds of the hyper rectangle */
-  double lb[sDIM]={-1,-1.5};  
+  double lb[sDIM]={1};  
   /* upper bounds of the hyper rectangle */
-  double ub[sDIM]={1,1.5}; 
+  double ub[sDIM]={50}; 
   /* grid node distance diameter */
-  double eta[sDIM]={.3,.2};   
+  double eta[sDIM]={1};   
+  // double eta[sDIM]={5};   
 
   scots::SymbolicSet is(mgr,iDIM,lb,ub,eta);
   is.addGridPoints();
